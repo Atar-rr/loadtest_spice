@@ -1,6 +1,6 @@
 module performance
 
-go 1.21
+go 1.22.3
 
 require (
 	github.com/authzed/authzed-go v0.10.1

@@ -6,13 +6,14 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 )
 
 const (
-	UsersCount          = 100000
-	WorkerGenerateCount = 10
+	UsersCount          = 1000000
+	WorkerGenerateCount = 100
 
 	ProjectCount     = UsersCount / 1000
 	ServiceCount     = ProjectCount / 100
@@ -130,6 +131,8 @@ func loadTest(ctx context.Context, client *SpiceDbClient, users *Users, concurre
 - - time (min)
 */
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
+
 	var concurrency int
 	var timer int
 
