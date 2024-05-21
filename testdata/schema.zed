@@ -1,0 +1,40 @@
+definition user {}
+
+definition role {
+    relation member: user
+}
+
+definition project {
+    relation editor: role
+    relation viewer: role
+    relation member: user | role
+
+    permission edit = editor->member
+    permission view = viewer->member + editor->member
+    permission delete = editor->member
+}
+
+definition service {
+    relation editor: role
+    relation parent: project
+
+    permission edit = editor->member & parent->member
+    permission delete = editor->member & parent->member
+}
+
+definition service_nova {
+    relation vm_creator: role | project#edit
+
+    permission create_vm = vm_creator
+    permission view_vm = vm_creator
+    permission create_network = vm_creator
+}
+
+definition virtual_machine {
+    relation editor: user | role
+    relation viewer: user | role
+    relation parent: service_nova
+    
+    permission edit = editor & parent
+    permission view = viewer
+}
