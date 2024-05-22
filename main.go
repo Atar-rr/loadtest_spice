@@ -2,18 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"io"
 	"log"
 	"math/rand"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 )
 
 const (
 	UsersCount          = 1000000
-	WorkerGenerateCount = 100
+	WorkerGenerateCount = 1000
 
 	ProjectCount     = UsersCount / 1000
 	ServiceCount     = ProjectCount / 100
@@ -48,32 +49,44 @@ type CheckReq struct {
 }
 
 type RelReq struct {
-	ObjectType  string
-	ObjectID    string
-	SubjectType string
-	SubjectID   string
-	Relation    string
+	ObjectType  string `json:"object_type"`
+	ObjectID    string `json:"object_id"`
+	SubjectType string `json:"subject_type"`
+	SubjectID   string `json:"subject_id"`
+	Relation    string `json:"relation"`
 }
 
-func loadTest(ctx context.Context, client *SpiceDbClient, users *Users, concurrency int, timer time.Duration) {
+func loadTest(ctx context.Context, client *SpiceDbClient, concurrency int, timer time.Duration) error {
 	mCh := make(chan Metric, concurrency)
 	readEnd := make(chan bool)
 
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*timer)
+	file, err := os.OpenFile(FileName, os.O_RDONLY, 0666)
+	defer file.Close()
+	if err != nil {
+		return err
+	}
+	b, err := io.ReadAll(file)
+
+	var users Users
+	err = json.Unmarshal(b, &users)
+	if err != nil {
+		return err
+	}
+
+	rand.Shuffle(len(users.List), func(i, j int) {
+		users.List[i], users.List[j] = users.List[j], users.List[i]
+	})
+
+	usersCheck := users.List[0 : UsersCount/10]
 
 	stat := InitStat()
 
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*timer)
 	go stat.readMetrics(ctx, mCh, readEnd)
 
 	wg := sync.WaitGroup{}
 
 	wg.Add(concurrency)
-
-	rand.Shuffle(len(users.list), func(i, j int) {
-		users.list[i], users.list[j] = users.list[j], users.list[i]
-	})
-
-	usersCheck := users.list[0 : UsersCount/10]
 
 	defer cancel()
 	for i := 0; i < concurrency; i++ {
@@ -85,11 +98,7 @@ func loadTest(ctx context.Context, client *SpiceDbClient, users *Users, concurre
 				case <-ctx.Done():
 					return
 				default:
-					reqs := users.rel[usersCheck[rand.Intn(len(usersCheck))]]
-					if len(reqs) > 1 {
-						t := 1
-						_ = t
-					}
+					reqs := users.Rel[usersCheck[rand.Intn(len(usersCheck))]]
 					req := reqs[rand.Intn(len(reqs))]
 
 					start := time.Now()
@@ -121,6 +130,8 @@ func loadTest(ctx context.Context, client *SpiceDbClient, users *Users, concurre
 	<-readEnd
 
 	stat.calculate(timer)
+
+	return nil
 }
 
 /*
@@ -131,13 +142,15 @@ func loadTest(ctx context.Context, client *SpiceDbClient, users *Users, concurre
 - - time (min)
 */
 func main() {
-	runtime.GOMAXPROCS(runtime.NumCPU() * 2)
+	//runtime.GOMAXPROCS(runtime.NumCPU() * 2)
 
 	var concurrency int
 	var timer int
+	var init bool
 
 	flag.IntVar(&concurrency, "rps", 100000, "a int var")
 	flag.IntVar(&timer, "timer", 1, "a int var")
+	flag.BoolVar(&init, "init", false, "a bool var")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -147,25 +160,28 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//if len(os.Args) > 1 && os.Args[1] == "init" {
-	data, err := os.ReadFile(SpicedbSchemaPath)
+	if init {
+		data, err := os.ReadFile(SpicedbSchemaPath)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = client.WriteSchema(ctx, data)
+		if err != nil {
+			log.Fatalf("failed to write schema: %s", err)
+		}
+
+		users := initUsers()
+		users.generate()
+		err = users.makeRelations(ctx, client)
+
+		if err != nil {
+			log.Fatalf("make relation: %s", err)
+		}
+	}
+
+	err = loadTest(ctx, client, concurrency, time.Duration(timer))
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	err = client.WriteSchema(ctx, data)
-	if err != nil {
-		log.Fatalf("failed to write schema: %s", err)
-	}
-
-	users := initUsers()
-	users.generate()
-	err = users.makeRelations(ctx, client)
-
-	if err != nil {
-		log.Fatalf("make relation: %s", err)
-	}
-	//}
-
-	loadTest(ctx, client, users, concurrency, time.Duration(timer))
 }
