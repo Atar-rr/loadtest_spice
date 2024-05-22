@@ -81,12 +81,13 @@ func loadTest(ctx context.Context, client *SpiceDbClient, concurrency int, timer
 
 	stat := InitStat()
 
-	ctx, cancel := context.WithTimeout(ctx, time.Minute*timer)
-	go stat.readMetrics(ctx, mCh, readEnd)
+	go stat.readMetrics(mCh, readEnd)
 
 	wg := sync.WaitGroup{}
 
 	wg.Add(concurrency)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*timer)
 
 	defer cancel()
 	for i := 0; i < concurrency; i++ {
@@ -102,6 +103,7 @@ func loadTest(ctx context.Context, client *SpiceDbClient, concurrency int, timer
 					req := reqs[rand.Intn(len(reqs))]
 
 					start := time.Now()
+					stat.incrReq()
 
 					_, err := client.CheckPermission(context.Background(), &CheckReq{
 						ObjectType:  req.ObjectType,
